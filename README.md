@@ -157,6 +157,167 @@ Upgrade from the chat page — click **View plans**.
 
 ---
 
+## Developer API
+
+### Authentication
+
+Generate an API key from the Navi chat page (requires API Starter or Business plan).
+
+All requests must include your API key in the `Authorization` header:
+```
+Authorization: Bearer navi_your_api_key_here
+```
+
+---
+
+### Endpoint
+
+```
+POST https://jwrightt07-bi-agent-v2.hf.space/navi-api/analyze
+```
+
+> **Note:** Call HF directly — do not use the Vercel proxy (`www.navi-os.cc/api/v1/analyze`) for the analyze endpoint, as it has a 10-second timeout. Direct HF calls have no timeout.
+
+---
+
+### Headers
+
+| Header | Required | Value |
+|--------|----------|-------|
+| `Authorization` | Yes | Your HF Space token (`Bearer hf_...`) |
+| `X-Navi-Key` | Yes | Your Navi API key (`Bearer navi_...`) |
+
+> You need both headers: `Authorization` authenticates with the HF Space, `X-Navi-Key` authenticates with Navi's billing system.
+
+---
+
+### Request
+
+**Content-Type:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prompt` | string | Yes | Your analysis question |
+| `file` | file | No | CSV or Excel dataset (.csv, .xlsx, .xls) |
+| `df_key` | string | No | Reuse a previously uploaded dataset by key |
+
+---
+
+### Response
+
+```json
+{
+  "reply": "The dataset contains 36 rows and 12 columns...",
+  "images": ["base64_encoded_png", "..."],
+  "calculations": {
+    "Total Rows": 36,
+    "Total Columns": 12,
+    "Overall Death Rate": 1.35
+  },
+  "usage": {
+    "calls_used": 2,
+    "calls_limit": 500,
+    "calls_remaining": 498
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reply` | string | Written analysis and insights |
+| `images` | array | Base64-encoded PNG charts (decode to display) |
+| `calculations` | object | Extracted numeric metrics |
+| `usage` | object | Current billing usage for your API key |
+
+---
+
+### Example (curl)
+
+```bash
+curl -s -X POST "https://jwrightt07-bi-agent-v2.hf.space/navi-api/analyze" -H "Authorization: Bearer YOUR_HF_TOKEN" -H "X-Navi-Key: Bearer YOUR_API_KEY" -F "prompt=Describe the dataset" -F "file=@data.csv" | python3 -m json.tool
+```
+
+### Example (Python)
+
+```python
+import requests, base64
+from PIL import Image
+from io import BytesIO
+
+response = requests.post(
+    "https://jwrightt07-bi-agent-v2.hf.space/navi-api/analyze",
+    headers={
+        "Authorization": "Bearer YOUR_HF_TOKEN",
+        "X-Navi-Key":    "Bearer YOUR_API_KEY",
+    },
+    files={"file": open("data.csv", "rb")},
+    data={"prompt": "What are the top revenue drivers?"},
+)
+
+result = response.json()
+print(result["reply"])
+
+# Decode and display charts
+for i, b64 in enumerate(result.get("images", [])):
+    img = Image.open(BytesIO(base64.b64decode(b64)))
+    img.save(f"chart_{i}.png")
+```
+
+### Example (JavaScript/Node.js)
+
+```javascript
+const FormData = require("form-data");
+const fs       = require("fs");
+const fetch    = require("node-fetch");
+
+const form = new FormData();
+form.append("prompt", "What are the top revenue drivers?");
+form.append("file",   fs.createReadStream("data.csv"));
+
+const res  = await fetch("https://jwrightt07-bi-agent-v2.hf.space/navi-api/analyze", {
+  method:  "POST",
+  headers: {
+    "Authorization": "Bearer YOUR_HF_TOKEN",
+    "X-Navi-Key":    "Bearer YOUR_API_KEY",
+    ...form.getHeaders(),
+  },
+  body: form,
+});
+
+const { reply, images, calculations, usage } = await res.json();
+console.log(reply);
+```
+
+---
+
+### Two-step upload (large files)
+
+For files over 4.5MB, upload the file first to get a `df_key`, then pass that key to the analyze endpoint instead of re-uploading the file.
+
+**Step 1 — Upload file:**
+```bash
+curl -s -X POST "https://jwrightt07-bi-agent-v2.hf.space/process-file" -H "Authorization: Bearer YOUR_HF_TOKEN" -F "file=@large_dataset.csv"
+# Returns: {"df_key": "navi_abc123", "shape": {"rows": 541909, "cols": 8}}
+```
+
+**Step 2 — Analyze with df_key:**
+```bash
+curl -s -X POST "https://jwrightt07-bi-agent-v2.hf.space/navi-api/analyze" -H "Authorization: Bearer YOUR_HF_TOKEN" -H "X-Navi-Key: Bearer YOUR_API_KEY" -F "prompt=Describe the dataset" -F "df_key=navi_abc123" | python3 -m json.tool
+```
+
+---
+
+### Error codes
+
+| Status | Meaning |
+|--------|---------|
+| 401 | Invalid or inactive API key |
+| 422 | Missing required field (prompt) |
+| 429 | Monthly call limit reached |
+| 500 | Analysis error — check prompt or file format |
+
+---
+
 ## Pricing
 
 | Plan | Price | What you get |
@@ -250,7 +411,3 @@ npm run dev
 | `NAVI_AWS_SECRET_ACCESS_KEY` | AWS secret for cross-account STS |
 | `NAVI_SERVICE_ARN` | Navi's IAM user ARN (injected into CF template) |
 | `CF_TEMPLATE_URL` | S3 URL of the CloudFormation template |
-
----
-
-*Navi OS — Privacy-first AI agent for data analysis and research.*
